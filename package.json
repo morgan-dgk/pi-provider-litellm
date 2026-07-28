@@ -29,11 +29,11 @@
     "auto-discovery"
   ],
   "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
     "@earendil-works/pi-coding-agent": "*",
     "typebox": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "file:../../../../.npm-packages/lib/node_modules/@earendil-works/pi-coding-agent/node_modules/@earendil-works/pi-ai",
     "@earendil-works/pi-coding-agent": "*",
     "@types/node": "^22.0.0",
     "typescript": "^5.9.0",
