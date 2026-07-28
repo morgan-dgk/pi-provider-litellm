@@ -1,7 +1,6 @@
 import type { ExtensionAPI, BeforeAgentStartEvent, BeforeAgentStartEventResult } from '@earendil-works/pi-coding-agent'
 import { resolvePluginConfig, discoverModels, discoverMcpTools, buildProviderConfig, readSkillsSetting, writeSkillsSetting } from './litellm-api.js'
-import { createMcpToolDefinitions, createSkillToolDefinitions } from './tools.js'
-import { getGcloudToken } from './gcloud-token.js'
+import { createMcpToolDefinitions } from './tools.js'
 import { loadModelCache, saveModelCache } from './model-cache.js'
 import { createGcloudStreamSimple, setSessionId } from './stream-simple.js'
 import type { LiteLLMModelInfo, McpTool, PluginConfig, StreamSimpleFn } from './types.js'
@@ -19,17 +18,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     return
   }
 
-  const isGcloudAuth = !!(process.env.LITELLM_GCLOUD_TOKEN_AUTH &&
-    process.env.LITELLM_GCLOUD_TOKEN_AUTH !== '' &&
-    process.env.LITELLM_GCLOUD_TOKEN_AUTH !== '0')
-
-  // When gcloud token auth is enabled, fetch a live token instead of using the static apiKey
-  const getToken = async (): Promise<string> => {
-    if (isGcloudAuth) {
-      return (await getGcloudToken()) ?? ''
-    }
-    return config.apiKey
-  }
+  const token = config.apiKey
 
   // Re-register the provider with a fresh token (used by the streamSimple 401 handler)
   // Wrapped in try-catch to silently ignore stale ctx errors after session reload.
@@ -48,33 +37,21 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   }
 
-  // In gcloud mode, use a custom streamSimple that fetches a fresh token on every call
-  // and retries with a force-refreshed token on 401 errors.
-  // Pass providerId so the handler only applies gcloud logic to litellm's own models.
-  const streamSimple: StreamSimpleFn | undefined = isGcloudAuth
-    ? createGcloudStreamSimple(getToken, reregister, config.providerId)
-    : undefined
+  // Register a lightweight streamSimple so the x-litellm-session-id header
+  // is injected on every request, keeping completions grouped by pi session
+  // in the LiteLLM logs.
+  const streamSimple: StreamSimpleFn | undefined = createSessionHeaderStreamSimple(config.providerId)
 
-  // Track which tools have been registered to avoid duplicates across session restarts.
+   // Track which tools have been registered to avoid duplicates across session restarts.
   const registeredTools = new Set<string>()
 
   // Token refresh timer — cleared on session_shutdown to avoid stale context errors.
   let refreshTimer: ReturnType<typeof setInterval> | undefined
-
-  // Read the skills enabled flag once for startup. Both the remote skills sync
-  // and the skill_list tool registration are gated behind this setting.
-  const skillsEnabled = readSkillsSetting()
-
-  // Sync remote skills to local cache so pi discovers them natively.
-  // Pi scans ~/.pi/agent/skills/ and picks up skills from the remote/ subdirectory.
-  if (skillsEnabled) {
-    await syncRemoteSkills(config.url, getToken, (msg) => console.log(msg))
-  }
-
+  
   // Await discovery so PI blocks until models are registered before resolving
   // model patterns. Cache is loaded at the top of discoverAndRegister so the
   // first call returns quickly on subsequent startups.
-  await discoverAndRegister(pi, config, getToken, streamSimple, registeredTools, skillsEnabled)
+  await discoverAndRegister(pi, config, token, registeredTools, streamSimple)
 
   pi.on('session_start', async (_event, ctx) => {
     // Assign a stable session ID so all requests in this pi session are grouped
@@ -82,10 +59,7 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     // getSessionId() returns the UUID from the session header directly.
     setSessionId(ctx.sessionManager.getSessionId() ?? crypto.randomUUID())
 
-    // Re-read the setting fresh each time so enabling skills via /litellm-skills on
-    // during a session is picked up on the next session_start.
-    const sessionSkillsEnabled = readSkillsSetting()
-    await discoverAndRegister(pi, config, getToken, streamSimple, registeredTools, sessionSkillsEnabled)
+    await discoverAndRegister(pi, config, token, registeredTools, streamSimple)
   })
 
   pi.on('session_shutdown', async (_event, _ctx) => {
@@ -98,89 +72,15 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   })
 
-  // Periodically refresh the provider registration with a fresh token.
-  // Google OAuth access tokens expire after ~60 minutes, so we re-register
-  // every 45 minutes to stay ahead of expiry. The streamSimple handler also
-  // handles reactive 401 recovery on each individual request.
-  if (isGcloudAuth) {
-    refreshTimer = setInterval(async () => {
-      try {
-        const token = await getToken()
-        if (token) {
-          const models = loadModelCache(config.providerId)
-          if (models) {
-            pi.registerProvider(config.providerId, buildProviderConfig(config.url, token, models, streamSimple))
-          }
-        }
-      } catch (err) {
-        // Ignore stale context errors — the session was replaced and this timer
-        // will be cleared shortly, or a new one will be set up in session_start.
-        const msg = String(err)
-        if (!msg.includes('stale')) {
-          console.warn(`${LOG} Token refresh failed: ${err}`)
-        }
-      }
-    }, TOKEN_REFRESH_INTERVAL_MS)
-
-    // Ensure the timer doesn't keep the process alive if PI shuts down
-    if (refreshTimer.unref) {
-      refreshTimer.unref()
-    }
-  }
-
-  pi.registerCommand('litellm-skills', {
-    description: 'Toggle remote skill syncing: on | off | status',
-    handler: async (args: string, ctx) => {
-      const sub = args.trim().toLowerCase()
-
-      if (sub === 'on') {
-        writeSkillsSetting(true)
-        ctx.ui.notify('Skills enabled — syncing now…', 'info')
-        await syncRemoteSkills(config.url, getToken, (msg) => console.log(msg))
-        // Register the skill_list tool immediately so it's available without restart
-        await discoverAndRegister(pi, config, getToken, streamSimple, registeredTools, true)
-        const names = getCachedSkillNames()
-        ctx.ui.notify(`Skills ready: ${names.length} skills cached`, 'info')
-        return
-      }
-
-      if (sub === 'off') {
-        writeSkillsSetting(false)
-        clearSkillsCache()
-        ctx.ui.notify('Skills disabled — cache cleared. The skill_list tool will be removed on next restart.', 'info')
-        return
-      }
-
-      if (sub === 'status') {
-        const enabled = readSkillsSetting()
-        const names = getCachedSkillNames()
-        const ageMin = getCacheAgeMinutes()
-        const ageStr = ageMin !== null ? `${ageMin}m ago` : 'n/a'
-        const lines = [
-          `Skills: ${enabled ? '✅ enabled' : '❌ disabled'}`,
-          `Cached skills: ${names.length}`,
-          `Cache age: ${ageStr}`,
-        ]
-        ctx.ui.notify(lines.join('\n'), 'info')
-        return
-      }
-
-      // No args or unrecognised
-      ctx.ui.notify('Usage: /litellm-skills on | off | status', 'info')
-    },
-  })
 }
 
 export async function discoverAndRegister(
   pi: ExtensionAPI,
   config: PluginConfig,
-  getToken: () => Promise<string>,
-  streamSimple?: StreamSimpleFn,
+  token: string,
   registeredTools?: Set<string>,
-  skillsEnabled?: boolean,
+  streamSimple?: StreamSimpleFn,
 ): Promise<void> {
-  // Fetch one token up-front and reuse it for all registrations in this call.
-  const token = await getToken()
 
   // Register from cache before live discovery so models are visible immediately.
   const cached = loadModelCache(config.providerId)
@@ -229,7 +129,7 @@ export async function discoverAndRegister(
   }
 
   if (mcpResult.status === 'fulfilled') {
-    const mcpTools = createMcpToolDefinitions(config, getToken, mcpResult.value)
+    const mcpTools = createMcpToolDefinitions(config, token, mcpResult.value)
     for (const tool of mcpTools) {
       if (!registeredTools || !registeredTools.has(tool.name)) {
         pi.registerTool(tool)
@@ -238,15 +138,5 @@ export async function discoverAndRegister(
     }
   } else {
     console.warn(`${LOG} MCP tool discovery failed: ${mcpResult.reason}`)
-  }
-
-  if (skillsEnabled) {
-    const skillTools = createSkillToolDefinitions()
-    for (const tool of skillTools) {
-      if (!registeredTools || !registeredTools.has(tool.name)) {
-        pi.registerTool(tool)
-        registeredTools?.add(tool.name)
-      }
-    }
   }
 }

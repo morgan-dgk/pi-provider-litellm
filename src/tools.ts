@@ -7,7 +7,6 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import type { McpTool, PluginConfig } from './types.js'
 import { executeMcpTool } from './litellm-api.js'
-import { getCachedSkillNames, getCachedSkillPath } from './skills-cache.js'
 
 export function sanitizeName(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]/g, '_')
@@ -144,46 +143,6 @@ export function createMcpToolDefinitions(
       },
     }
   })
-}
-
-/**
- * Skill tools for the remote skill cache.
- *
- * Skills are synced to ~/.pi/agent/skills/remote/ on startup, so pi discovers
- * them natively (they appear in <available_skills> and the agent can read them
- * directly). This tool just lists what's available.
- */
-export function createSkillToolDefinitions(): ToolDefinition[] {
-  return [
-    {
-      name: 'skill_list',
-      label: 'skill_list',
-      description: 'List all available skills (from remote cache)',
-      parameters: Type.Object({}),
-      async execute(
-        _toolCallId: string,
-        _params: Record<string, unknown>,
-        _signal: AbortSignal | undefined,
-        _onUpdate: AgentToolUpdateCallback<unknown> | undefined,
-        _ctx: ExtensionContext,
-      ): Promise<AgentToolResult<undefined>> {
-        const names = getCachedSkillNames()
-        if (!names.length) {
-          return { content: [{ type: 'text', text: 'No remote skills cached. They will be synced on next session start.' }], details: undefined }
-        }
-        const header = '| Name | Local Path |'
-        const sep = '|------|------------|'
-        const rows = names.map((name) => {
-          const resolved = getCachedSkillPath(name)
-          return `| ${name} | ${resolved ?? `~/.pi/agent/skills/remote/${name}/SKILL.md`} |`
-        })
-        return {
-          content: [{ type: 'text', text: [header, sep, ...rows].join('\n') }],
-          details: undefined,
-        }
-      },
-    },
-  ]
 }
 
 

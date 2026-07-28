@@ -231,20 +231,3 @@ describe('createMcpToolDefinitions', () => {
     expect(defs[0].parameters).toEqual(Type.Object({ args: Type.String() }))
   })
 })
-
-describe('createSkillToolDefinitions', () => {
-  it('returns 1 tool (skill_list)', () => {
-    const defs = createSkillToolDefinitions()
-    expect(defs).toHaveLength(1)
-  })
-
-  it('has skill_list tool', () => {
-    const defs = createSkillToolDefinitions()
-    expect(defs[0].name).toBe('skill_list')
-  })
-
-  it('skill_list has no parameters', () => {
-    const defs = createSkillToolDefinitions()
-    expect(defs[0].parameters).toEqual(Type.Object({}))
-  })
-})
