@@ -1,10 +1,9 @@
-import type { ExtensionAPI, BeforeAgentStartEvent, BeforeAgentStartEventResult } from '@earendil-works/pi-coding-agent'
-import { resolvePluginConfig, discoverModels, discoverMcpTools, buildProviderConfig, readSkillsSetting, writeSkillsSetting } from './litellm-api.js'
+import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import { resolvePluginConfig, discoverModels, discoverMcpTools, buildProviderConfig } from './litellm-api.js'
 import { createMcpToolDefinitions } from './tools.js'
 import { loadModelCache, saveModelCache } from './model-cache.js'
-import { createGcloudStreamSimple, setSessionId } from './stream-simple.js'
+import { createSessionHeaderStreamSimple, setSessionId } from './stream-simple.js'
 import type { LiteLLMModelInfo, McpTool, PluginConfig, StreamSimpleFn } from './types.js'
-import { syncRemoteSkills, clearSkillsCache, getCachedSkillNames, getCacheAgeMinutes } from './skills-cache.js'
 
 const LOG = '[pi-provider-litellm]'
 // Re-register the provider every 45 minutes to pick up a fresh gcloud OAuth token
