@@ -4,12 +4,11 @@ import {
   sanitizeName,
   buildTypeBoxSchema,
   createMcpToolDefinitions,
-  createSkillToolDefinitions,
 } from '../src/tools.js'
 import type { McpTool, PluginConfig } from '../src/types.js'
 
 const mockConfig: PluginConfig = { url: 'http://localhost:4000', apiKey: 'test-key', providerId: 'litellm' }
-const mockGetToken = () => Promise.resolve('test-token')
+const token = 'test-token'
 
 describe('sanitizeName', () => {
   it('lowercases and replaces non-alphanumeric with underscore', () => {
@@ -202,25 +201,25 @@ describe('createMcpToolDefinitions', () => {
   ]
 
   it('produces correct mcp_{server}_{tool} names', () => {
-    const defs = createMcpToolDefinitions(mockConfig, mockGetToken, mockMcpTools)
+    const defs = createMcpToolDefinitions(mockConfig, token, mockMcpTools)
     expect(defs[0].name).toBe('mcp_file_server_read_file')
     expect(defs[1].name).toBe('mcp_search_api_search_web')
   })
 
   it('includes server name in description', () => {
-    const defs = createMcpToolDefinitions(mockConfig, mockGetToken, mockMcpTools)
+    const defs = createMcpToolDefinitions(mockConfig, token, mockMcpTools)
     expect(defs[0].description).toContain('via File-Server MCP server')
     expect(defs[1].description).toContain('via Search-API MCP server')
   })
 
   it('label matches name', () => {
-    const defs = createMcpToolDefinitions(mockConfig, mockGetToken, mockMcpTools)
+    const defs = createMcpToolDefinitions(mockConfig, token, mockMcpTools)
     expect(defs[0].label).toBe(defs[0].name)
     expect(defs[1].label).toBe(defs[1].name)
   })
 
   it('uses fallback args schema for unparseable input_schema', () => {
-    const defs = createMcpToolDefinitions(mockConfig, mockGetToken, [
+    const defs = createMcpToolDefinitions(mockConfig, token, [
       {
         name: 'broken',
         server_name: 'test',

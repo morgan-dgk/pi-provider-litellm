@@ -107,7 +107,7 @@ export function buildTypeBoxSchema(inputSchema: Record<string, unknown>): TSchem
 
 export function createMcpToolDefinitions(
   config: PluginConfig,
-  getToken: () => Promise<string>,
+  token: string,
   mcpTools: McpTool[],
 ): ToolDefinition[] {
   return mcpTools.map((tool) => {
@@ -134,7 +134,6 @@ export function createMcpToolDefinitions(
           ? (typeof params.args === 'string' ? (() => { try { return JSON.parse(params.args) } catch { return params.args } })() : params.args)
           : params
 
-        const token = await getToken()
         const result = await executeMcpTool(config, token, server, toolName, args as Record<string, unknown>)
         return {
           content: [{ type: 'text', text: result }],
