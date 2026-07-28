@@ -3,7 +3,7 @@ import type { ExtensionAPI, BeforeAgentStartEvent, BeforeAgentStartEventResult, 
 import type { PluginConfig } from '../src/types.js'
 
 const mockConfig: PluginConfig = { url: 'http://localhost:4000', apiKey: 'test-key', providerId: 'litellm' }
-const mockGetToken = () => Promise.resolve('test-key')
+const token = 'test-key'
 
 function createMockPi(): MockPi {
   const handlers: Record<string, Function[]> = {}
@@ -50,7 +50,7 @@ describe('extension entry point', () => {
     }))
     vi.doMock('@earendil-works/pi-ai', () => ({
       createAssistantMessageEventStream: vi.fn(),
-      streamSimpleOpenAICompletions: vi.fn(),
+      openAICompletionsApi: () => ({ streamSimple: vi.fn() }),
     }))
   })
 
@@ -108,87 +108,6 @@ describe('extension entry point', () => {
     expect(mockPi.registerTool).toHaveBeenCalled()
   })
 
-  it('registers skill tools when skills are enabled even if MCP discovery fails', async () => {
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockRejectedValue(new Error('MCP error')),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(true),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.default(mockPi as unknown as ExtensionAPI)
-    await new Promise((r) => setTimeout(r, 0)) // flush fire-and-forget discovery
-
-    expect(mockPi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_list' }))
-  })
-
-  it('does not register skill tools when skills are disabled', async () => {
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockResolvedValue([]),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(false),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.default(mockPi as unknown as ExtensionAPI)
-    await new Promise((r) => setTimeout(r, 0)) // flush fire-and-forget discovery
-
-    expect(mockPi.registerTool).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_list' }))
-  })
-
-  it('does not sync remote skills when skills are disabled', async () => {
-    const syncMock = vi.fn().mockResolvedValue({ count: 0, names: [], errored: [] })
-    vi.doMock('../src/skills-cache.js', () => ({
-      syncRemoteSkills: syncMock,
-      clearSkillsCache: vi.fn(),
-      getCachedSkillNames: vi.fn().mockReturnValue([]),
-      getCacheAgeMinutes: vi.fn().mockReturnValue(null),
-    }))
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockResolvedValue([]),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(false),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.default(mockPi as unknown as ExtensionAPI)
-    await new Promise((r) => setTimeout(r, 0))
-
-    expect(syncMock).not.toHaveBeenCalled()
-  })
-
-  it('syncs remote skills when skills are enabled', async () => {
-    const syncMock = vi.fn().mockResolvedValue({ count: 0, names: [], errored: [] })
-    vi.doMock('../src/skills-cache.js', () => ({
-      syncRemoteSkills: syncMock,
-      clearSkillsCache: vi.fn(),
-      getCachedSkillNames: vi.fn().mockReturnValue([]),
-      getCacheAgeMinutes: vi.fn().mockReturnValue(null),
-    }))
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockResolvedValue([]),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(true),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.default(mockPi as unknown as ExtensionAPI)
-    await new Promise((r) => setTimeout(r, 0))
-
-    expect(syncMock).toHaveBeenCalled()
-  })
 })
 
 describe('discoverAndRegister', () => {
@@ -202,15 +121,9 @@ describe('discoverAndRegister', () => {
       loadModelCache: vi.fn().mockReturnValue(null),
       saveModelCache: vi.fn(),
     }))
-    vi.doMock('../src/skills-cache.js', () => ({
-      syncRemoteSkills: vi.fn().mockResolvedValue({ count: 0, names: [], errored: [] }),
-      clearSkillsCache: vi.fn(),
-      getCachedSkillNames: vi.fn().mockReturnValue([]),
-      getCacheAgeMinutes: vi.fn().mockReturnValue(null),
-    }))
     vi.doMock('@earendil-works/pi-ai', () => ({
       createAssistantMessageEventStream: vi.fn(),
-      streamSimpleOpenAICompletions: vi.fn(),
+      openAICompletionsApi: () => ({ streamSimple: vi.fn() }),
     }))
   })
 
@@ -232,7 +145,7 @@ describe('discoverAndRegister', () => {
 
     const mod = await import('../src/index.js')
     const mockPi = createMockPi()
-    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, mockGetToken)
+    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, token)
 
     expect(mockPi.registerProvider).toHaveBeenCalled()
   })
@@ -248,48 +161,18 @@ describe('discoverAndRegister', () => {
 
     const mod = await import('../src/index.js')
     const mockPi = createMockPi()
-    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, mockGetToken)
+    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, token)
 
     expect(mockPi.registerProvider).not.toHaveBeenCalled()
     expect(mockPi.registerTool).toHaveBeenCalled()
   })
 
-  it('registers skill tools when skillsEnabled is true', async () => {
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockRejectedValue(new Error('mcp error')),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(false),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, mockGetToken, undefined, undefined, true)
-
-    expect(mockPi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_list' }))
-  })
-
-  it('does not register skill tools when skillsEnabled is omitted (defaults false)', async () => {
-    vi.doMock('../src/litellm-api.js', () => ({
-      resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
-      discoverMcpTools: vi.fn().mockResolvedValue([]),
-      buildProviderConfig: vi.fn(),
-      readSkillsSetting: vi.fn().mockReturnValue(false),
-    }))
-
-    const mod = await import('../src/index.js')
-    const mockPi = createMockPi()
-    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, mockGetToken)
-
-    expect(mockPi.registerTool).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_list' }))
-  })
-
   it('registers MCP tools even when skillsEnabled is false', async () => {
+    const mockModels = { 'gpt-4': { model_name: 'gpt-4' } }
+
     vi.doMock('../src/litellm-api.js', () => ({
       resolvePluginConfig: () => mockConfig,
-      discoverModels: vi.fn().mockResolvedValue({}),
+      discoverModels: vi.fn().mockResolvedValue(mockModels),
       discoverMcpTools: vi.fn().mockResolvedValue([{ name: 'mcp_tool', description: 'x', input_schema: { type: 'object' }, server_name: 'srv' }]),
       buildProviderConfig: vi.fn(),
       readSkillsSetting: vi.fn().mockReturnValue(false),
@@ -297,7 +180,7 @@ describe('discoverAndRegister', () => {
 
     const mod = await import('../src/index.js')
     const mockPi = createMockPi()
-    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, mockGetToken, undefined, undefined, false)
+    await mod.discoverAndRegister(mockPi as unknown as ExtensionAPI, mockConfig, token, undefined, undefined)
 
     expect(mockPi.registerTool).toHaveBeenCalledWith(expect.objectContaining({ name: 'mcp_srv_mcp_tool' }))
     expect(mockPi.registerTool).not.toHaveBeenCalledWith(expect.objectContaining({ name: 'skill_list' }))
