@@ -40,5 +40,10 @@
     "vitest": "^4.0.0"
   },
   "author": "Daniel Cherubini",
+  "contributors": [
+    {
+      "name": "Morgan Kerle"
+    }
+  ],
   "license": "MIT"
 }
