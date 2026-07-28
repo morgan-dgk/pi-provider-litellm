@@ -96,6 +96,29 @@ export async function discoverModels(config: PluginConfig, token: string): Promi
   )
 
   if (status === 403) {
+    // The key is restricted from /health — try the standard OpenAI-compatible /v1/models
+    // endpoint which is permitted for keys scoped to llm_api_routes.
+    const modelsRes = await fetchJson<{ data?: unknown[] }>(
+      `${config.url}/v1/models`,
+      DISCOVERY_TIMEOUT,
+      { headers: { 'Authorization': `Bearer ${token}` } }
+    )
+
+    if (modelsRes?.data && Array.isArray(modelsRes.data) && modelsRes.data.length > 0) {
+      const infoMap: Record<string, LiteLLMModelInfo> = {}
+      for (const entry of modelsRes.data) {
+        if (typeof entry !== 'object' || !entry) continue
+        const e = entry as Record<string, unknown>
+        const modelId = typeof e.id === 'string' ? e.id : null
+        if (!modelId) continue
+        const modelInfo: Record<string, unknown> = {}
+        if (typeof e.max_input_tokens === 'number') modelInfo.max_input_tokens = e.max_input_tokens
+        if (typeof e.max_output_tokens === 'number') modelInfo.max_output_tokens = e.max_output_tokens
+        infoMap[modelId] = mergeModelInfo(modelId, modelInfo, {})
+      }
+      return infoMap
+    }
+
     throw new Error('Access denied (403). Check your LiteLLM API key or contact your admin.')
   }
 

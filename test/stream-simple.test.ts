@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createSessionHeaderStreamSimple, setSessionId } from '../src/stream-simple';
 
 // --- helpers ----------------------------------------------------------------
 
@@ -42,18 +43,11 @@ function createFakeStream() {
 // --- mocks ------------------------------------------------------------------
 
 const mockStreamSimpleOpenAICompletions = vi.hoisted(() => vi.fn())
-const mockResetTokenCache = vi.hoisted(() => vi.fn())
 
 vi.mock('@earendil-works/pi-ai', () => ({
   createAssistantMessageEventStream: () => createFakeStream(),
-  streamSimpleOpenAICompletions: mockStreamSimpleOpenAICompletions,
+  openAICompletionsApi: () => ({ streamSimple: mockStreamSimpleOpenAICompletions }),
 }))
-
-vi.mock('../src/gcloud-token.js', () => ({
-  resetTokenCache: mockResetTokenCache,
-}))
-
-import { createGcloudStreamSimple } from '../src/stream-simple.js'
 
 // --- helpers for consuming the outer stream ---------------------------------
 
@@ -67,27 +61,21 @@ async function collectEvents(stream: AsyncIterable<unknown>): Promise<unknown[]>
 
 // --- tests ------------------------------------------------------------------
 
-describe('createGcloudStreamSimple', () => {
+describe('createSessionHeaderStreamSimple', () => {
   // Use 'test' as the providerId to match fakeModel.provider
   const PROVIDER_ID = 'test'
   const fakeModel = { api: 'openai-completions', provider: PROVIDER_ID, id: 'test-model' } as any
   const fakeContext = { systemPrompt: '', messages: [], tools: [] } as any
 
-  let getToken: ReturnType<typeof vi.fn>
-  let reregister: ReturnType<typeof vi.fn>
-
   beforeEach(() => {
-    getToken = vi.fn().mockResolvedValue('token-1')
-    reregister = vi.fn()
     mockStreamSimpleOpenAICompletions.mockReset()
-    mockResetTokenCache.mockReset()
   })
 
   it('forwards events from the inner stream to the outer stream', async () => {
     const inner = createFakeStream()
     mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
 
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
     const outer = streamSimple(fakeModel, fakeContext)
 
     // Push events through the inner stream
@@ -103,72 +91,92 @@ describe('createGcloudStreamSimple', () => {
     expect((events[2] as any).type).toBe('done')
   })
 
-  it('injects the token from getToken into apiKey', async () => {
+  it('injects x-litellm-session-id into the options headers', () => {
+    const SESSION_ID = 'test-session-abc-123'
+    setSessionId(SESSION_ID)
+
     const inner = createFakeStream()
     mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
 
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
     streamSimple(fakeModel, fakeContext)
 
-    // Let the async IIFE run
-    await new Promise((r) => setTimeout(r, 0))
-
+    // Verify streamSimpleOpenAICompletions was called with the session header
+    expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledOnce()
     expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.objectContaining({ apiKey: 'token-1' }),
+      fakeModel,
+      fakeContext,
+      expect.objectContaining({ headers: expect.objectContaining({ 'x-litellm-session-id': SESSION_ID }) }),
     )
 
-    inner.push({ type: 'done', reason: 'stop', message: {} })
-    inner.end()
+    // Cleanup
+    setSessionId(undefined)
   })
 
-  it('retries with a fresh token on 401 error', async () => {
-    // First attempt: returns 401 error
-    const inner1 = createFakeStream()
-    // Second attempt: succeeds
-    const inner2 = createFakeStream()
+  it('merges x-litellm-session-id with pre-existing caller headers', () => {
+    const SESSION_ID = 'test-session-merged-456'
+    setSessionId(SESSION_ID)
 
-    getToken
-      .mockResolvedValueOnce('token-1')
-      .mockResolvedValueOnce('token-2')
+    const inner = createFakeStream()
+    mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
 
-    mockStreamSimpleOpenAICompletions
-      .mockReturnValueOnce(inner1)
-      .mockReturnValueOnce(inner2)
+    const callerOptions = { headers: { 'x-custom-header': 'my-value' } }
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
+    streamSimple(fakeModel, fakeContext, callerOptions as any)
 
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
-    const outer = streamSimple(fakeModel, fakeContext)
+    expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledWith(
+      fakeModel,
+      fakeContext,
+      expect.objectContaining({ headers: expect.objectContaining({
+        'x-litellm-session-id': SESSION_ID,
+        'x-custom-header': 'my-value',
+      })}),
+    )
 
-    // Simulate 401 on first stream
-    inner1.push({ type: 'error', reason: 'error', error: { errorMessage: '401 Unauthorized' } })
-    inner1.end()
+    // Cleanup
+    setSessionId(undefined)
+  })
 
-    // Wait for retry to kick in
-    await new Promise((r) => setTimeout(r, 10))
+  it('does not inject x-litellm-session-id when no session ID is set', () => {
+    setSessionId(undefined) // explicitly clear
 
-    // Second stream succeeds
-    inner2.push({ type: 'start', partial: {} })
-    inner2.push({ type: 'done', reason: 'stop', message: {} })
-    inner2.end()
+    const inner = createFakeStream()
+    mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
 
-    const events = await collectEvents(outer as any)
-    expect(events).toHaveLength(2)
-    expect((events[0] as any).type).toBe('start')
-    expect((events[1] as any).type).toBe('done')
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
+    streamSimple(fakeModel, fakeContext)
 
-    // Verify token cache was reset and provider re-registered
-    expect(mockResetTokenCache).toHaveBeenCalled()
-    expect(reregister).toHaveBeenCalledWith('token-2')
-    // Two calls to streamSimpleOpenAICompletions
-    expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledTimes(2)
+    expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledWith(
+      fakeModel,
+      fakeContext,
+      expect.not.objectContaining({ headers: expect.objectContaining({ 'x-litellm-session-id': expect.anything() }) }),
+    )
+  })
+
+  it('does not inject headers for a different provider', () => {
+    const SESSION_ID = 'test-session-other-789'
+    setSessionId(SESSION_ID)
+
+    const inner = createFakeStream()
+    mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
+
+    // A model whose provider does NOT match the registered PROVIDER_ID
+    const otherModel = { api: 'openai-completions', provider: 'other-provider', id: 'other-model' } as any
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
+    streamSimple(otherModel, fakeContext)
+
+    // streamSimpleOpenAICompletions is called with the original (unmodified) options
+    expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledWith(otherModel, fakeContext, undefined)
+
+    // Cleanup
+    setSessionId(undefined)
   })
 
   it('forwards non-auth errors without retrying', async () => {
     const inner = createFakeStream()
     mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
 
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
+    const streamSimple = createSessionHeaderStreamSimple(PROVIDER_ID)
     const outer = streamSimple(fakeModel, fakeContext)
 
     inner.push({ type: 'error', reason: 'error', error: { errorMessage: 'rate limit exceeded' } })
@@ -180,70 +188,7 @@ describe('createGcloudStreamSimple', () => {
     expect((events[0] as any).error.errorMessage).toBe('rate limit exceeded')
 
     // No retry
-    expect(mockResetTokenCache).not.toHaveBeenCalled()
     expect(mockStreamSimpleOpenAICompletions).toHaveBeenCalledTimes(1)
   })
 
-  it('emits error when token refresh returns empty after 401', async () => {
-    const inner = createFakeStream()
-    mockStreamSimpleOpenAICompletions.mockReturnValue(inner)
-
-    getToken
-      .mockResolvedValueOnce('token-1')
-      .mockResolvedValueOnce('') // empty token on refresh
-
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
-    const outer = streamSimple(fakeModel, fakeContext)
-
-    inner.push({ type: 'error', reason: 'error', error: { errorMessage: '401 Unauthorized' } })
-    inner.end()
-
-    const events = await collectEvents(outer as any)
-    expect(events).toHaveLength(1)
-    expect((events[0] as any).type).toBe('error')
-    expect((events[0] as any).error.errorMessage).toContain('Failed to refresh gcloud token')
-  })
-
-  it('emits error when retry also gets 401', async () => {
-    const inner1 = createFakeStream()
-    const inner2 = createFakeStream()
-
-    getToken
-      .mockResolvedValueOnce('token-1')
-      .mockResolvedValueOnce('token-2')
-
-    mockStreamSimpleOpenAICompletions
-      .mockReturnValueOnce(inner1)
-      .mockReturnValueOnce(inner2)
-
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
-    const outer = streamSimple(fakeModel, fakeContext)
-
-    // First 401
-    inner1.push({ type: 'error', reason: 'error', error: { errorMessage: '401 Unauthorized' } })
-    inner1.end()
-
-    await new Promise((r) => setTimeout(r, 10))
-
-    // Second 401
-    inner2.push({ type: 'error', reason: 'error', error: { errorMessage: '401 Unauthorized' } })
-    inner2.end()
-
-    const events = await collectEvents(outer as any)
-    expect(events).toHaveLength(1)
-    expect((events[0] as any).type).toBe('error')
-    expect((events[0] as any).error.errorMessage).toContain('Authentication failed after token refresh')
-  })
-
-  it('emits error when getToken throws', async () => {
-    getToken.mockRejectedValue(new Error('credential file missing'))
-
-    const streamSimple = createGcloudStreamSimple(getToken, reregister, PROVIDER_ID)
-    const outer = streamSimple(fakeModel, fakeContext)
-
-    const events = await collectEvents(outer as any)
-    expect(events).toHaveLength(1)
-    expect((events[0] as any).type).toBe('error')
-    expect((events[0] as any).error.errorMessage).toBe('credential file missing')
-  })
 })
