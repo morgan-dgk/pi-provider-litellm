@@ -100,27 +100,27 @@ describe('formatUsageStatus', () => {
       maxBudget: 200.0,
       budgetResetAt: '2026-08-01T00:00:00+00:00',
     }
-    expect(formatUsageStatus(info)).toBe('💰 $31.21 / $200.00 · resets 2026/08/01')
+    expect(formatUsageStatus(info)).toBe('$31.21/$200.00 (2026/08/01)')
   })
 
   it('omits budget and reset when both are null', () => {
     const info: KeyUsageInfo = { spend: 5.5, maxBudget: null, budgetResetAt: null }
-    expect(formatUsageStatus(info)).toBe('💰 $5.50')
+    expect(formatUsageStatus(info)).toBe('$5.50')
   })
 
   it('includes budget but omits reset when budgetResetAt is null', () => {
     const info: KeyUsageInfo = { spend: 10.0, maxBudget: 100.0, budgetResetAt: null }
-    expect(formatUsageStatus(info)).toBe('💰 $10.00 / $100.00')
+    expect(formatUsageStatus(info)).toBe('$10.00/$100.00')
   })
 
   it('omits reset when budgetResetAt is an invalid date string', () => {
     const info: KeyUsageInfo = { spend: 1.0, maxBudget: 50.0, budgetResetAt: 'not-a-date' }
-    expect(formatUsageStatus(info)).toBe('💰 $1.00 / $50.00')
+    expect(formatUsageStatus(info)).toBe('$1.00/$50.00')
   })
 
   it('pads spend and budget to 2 decimal places', () => {
     const info: KeyUsageInfo = { spend: 1, maxBudget: 10, budgetResetAt: null }
-    expect(formatUsageStatus(info)).toBe('💰 $1.00 / $10.00')
+    expect(formatUsageStatus(info)).toBe('$1.00/$10.00')
   })
 
   it('uses UTC date components for the reset date', () => {
@@ -130,6 +130,6 @@ describe('formatUsageStatus', () => {
       maxBudget: null,
       budgetResetAt: '2026-08-01T00:00:00+00:00',
     }
-    expect(formatUsageStatus(info)).toBe('💰 $0.00 · resets 2026/08/01')
+    expect(formatUsageStatus(info)).toBe('$0.00 (2026/08/01)')
   })
 })

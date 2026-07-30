@@ -52,14 +52,14 @@ export async function fetchKeyInfo(config: PluginConfig, token: string): Promise
  * Format a KeyUsageInfo into a compact footer string.
  *
  * Examples:
- *   "$31.21 / $200.00 · resets 2026/08/01"
- *   "$31.21 / $200.00"
+ *   "$31.21/$200.00 (2026/08/01)"
+ *   "$31.21/$200.00"
  *   "$31.21"
  */
 export function formatUsageStatus(info: KeyUsageInfo): string {
   const spend = `$${info.spend.toFixed(2)}`
 
-  const budget = info.maxBudget !== null ? ` / $${info.maxBudget.toFixed(2)}` : ''
+  const budget = info.maxBudget !== null ? `/$${info.maxBudget.toFixed(2)}` : ''
 
   let reset = ''
   if (info.budgetResetAt !== null) {
@@ -68,9 +68,9 @@ export function formatUsageStatus(info: KeyUsageInfo): string {
       const yyyy = date.getUTCFullYear()
       const mm = String(date.getUTCMonth() + 1).padStart(2, '0')
       const dd = String(date.getUTCDate()).padStart(2, '0')
-      reset = ` · resets ${yyyy}/${mm}/${dd}`
+      reset = ` (${yyyy}/${mm}/${dd})`
     }
   }
 
-  return `💰 ${spend}${budget}${reset}`
+  return `${spend}${budget}${reset}`
 }
