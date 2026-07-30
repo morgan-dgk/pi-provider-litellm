@@ -1,8 +1,9 @@
-import type { ExtensionAPI } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { resolvePluginConfig, discoverModels, discoverMcpTools, buildProviderConfig } from './litellm-api.js'
 import { createMcpToolDefinitions } from './tools.js'
 import { loadModelCache, saveModelCache } from './model-cache.js'
 import { createSessionHeaderStreamSimple, setSessionId } from './stream-simple.js'
+import { fetchKeyInfo, formatUsageStatus } from './key-info.js'
 import type { LiteLLMModelInfo, McpTool, PluginConfig, StreamSimpleFn } from './types.js'
 
 const LOG = '[pi-provider-litellm]'
@@ -59,6 +60,11 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     setSessionId(ctx.sessionManager.getSessionId() ?? crypto.randomUUID())
 
     await discoverAndRegister(pi, config, token, registeredTools, streamSimple)
+    await refreshUsageStatus(config, token, ctx)
+  })
+
+  pi.on('agent_end', async (_event, ctx) => {
+    await refreshUsageStatus(config, token, ctx)
   })
 
   pi.on('session_shutdown', async (_event, _ctx) => {
@@ -71,6 +77,16 @@ export default async function (pi: ExtensionAPI): Promise<void> {
     }
   })
 
+}
+
+async function refreshUsageStatus(config: PluginConfig, token: string, ctx: ExtensionContext): Promise<void> {
+  const info = await fetchKeyInfo(config, token)
+  if (info === null) {
+    ctx.ui.setStatus('litellm-usage', undefined)
+    return
+  }
+  const label = formatUsageStatus(info)
+  ctx.ui.setStatus('litellm-usage', ctx.ui.theme.fg('dim', label))
 }
 
 export async function discoverAndRegister(
