@@ -309,17 +309,31 @@ export function mapToProviderModel(info: LiteLLMModelInfo): ProviderModelConfig 
     input.push('image')
   }
 
+  const cost = {
+    input: info.input_cost_per_token ? info.input_cost_per_token * 1_000_000 : 0,
+    output: info.output_cost_per_token ? info.output_cost_per_token * 1_000_000 : 0,
+    cacheRead: info.cache_read_input_token_cost ? info.cache_read_input_token_cost * 1_000_000 : 0,
+    cacheWrite: info.cache_creation_input_token_cost ? info.cache_creation_input_token_cost * 1_000_000 : 0,
+  }
+
+  if (info.mode === 'image_generation') {
+    return {
+      type: 'image',
+      api: 'litellm-images',
+      id: info.model_name ?? '',
+      name: info.model_name ?? '',
+      input,
+      output: ['image'],
+      cost,
+    }
+  }
+
   return {
     id: info.model_name ?? '',
     name: info.model_name ?? '',
     reasoning: info.supports_reasoning ?? false,
     input,
-    cost: {
-      input: info.input_cost_per_token ? info.input_cost_per_token * 1_000_000 : 0,
-      output: info.output_cost_per_token ? info.output_cost_per_token * 1_000_000 : 0,
-      cacheRead: info.cache_read_input_token_cost ? info.cache_read_input_token_cost * 1_000_000 : 0,
-      cacheWrite: info.cache_creation_input_token_cost ? info.cache_creation_input_token_cost * 1_000_000 : 0,
-    },
+    cost,
     contextWindow: info.max_input_tokens ?? info.max_tokens ?? 0,
     maxTokens: info.max_output_tokens ?? info.max_tokens ?? 0,
     compat: {
