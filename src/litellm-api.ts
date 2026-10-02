@@ -405,12 +405,19 @@ export function buildProviderConfig(
   streamSimple?: StreamSimpleFn,
 ): ProviderConfig {
   const mappedModels = Object.values(models).map(mapToProviderModel)
+  const config: PluginConfig = { url, apiKey, providerId: '' }
 
   return {
     baseUrl: url,
     apiKey,
     api: 'openai-completions',
     models: mappedModels,
+    images: {
+      'litellm-images': {
+        generateImages: (model, context, options) =>
+          generateImages(config, apiKey, model, context, options),
+      },
+    },
     ...(streamSimple ? { streamSimple } : {}),
   }
 }
