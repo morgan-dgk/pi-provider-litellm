@@ -23,6 +23,7 @@ export interface LiteLLMModelInfo {
   max_output_tokens?: number
   supports_function_calling?: boolean
   supports_reasoning?: boolean
+  mode?: string
   supports_vision?: boolean
   supports_audio_input?: boolean
   supports_pdf_input?: boolean
