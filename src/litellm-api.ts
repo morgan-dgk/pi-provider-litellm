@@ -343,6 +343,61 @@ export function mapToProviderModel(info: LiteLLMModelInfo): ProviderModelConfig 
   }
 }
 
+export async function generateImages(
+  config: PluginConfig,
+  token: string,
+  model: { id: string; provider: string },
+  context: { input: { type: string; text?: string }[] },
+  options?: { signal?: AbortSignal },
+): Promise<{
+  api: string
+  provider: string
+  model: string
+  output: { type: 'image'; data: string; mimeType: string }[]
+  stopReason: 'stop' | 'error' | 'aborted'
+  errorMessage?: string
+  timestamp: number
+}> {
+  const prompt = context.input
+    .filter((b) => b.type === 'text')
+    .map((b) => b.text ?? '')
+    .join('\n')
+    .trim()
+
+  try {
+    const res = await fetch(`${config.url}/v1/images/generations`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ model: model.id, prompt, n: 1, response_format: 'b64_json' }),
+      signal: options?.signal,
+    })
+
+    if (options?.signal?.aborted) {
+      return { api: 'litellm-images', provider: model.provider, model: model.id, output: [], stopReason: 'aborted', timestamp: Date.now() }
+    }
+
+    if (!res.ok) {
+      const errorText = await res.text().catch(() => res.statusText)
+      return { api: 'litellm-images', provider: model.provider, model: model.id, output: [], stopReason: 'error', errorMessage: `HTTP ${res.status}: ${errorText}`, timestamp: Date.now() }
+    }
+
+    const body = await res.json() as { data?: { b64_json?: string }[] }
+    const output = (body.data ?? [])
+      .filter((entry) => typeof entry.b64_json === 'string')
+      .map((entry) => ({ type: 'image' as const, data: entry.b64_json!, mimeType: 'image/png' }))
+
+    return { api: 'litellm-images', provider: model.provider, model: model.id, output, stopReason: 'stop', timestamp: Date.now() }
+  } catch (err) {
+    if (options?.signal?.aborted) {
+      return { api: 'litellm-images', provider: model.provider, model: model.id, output: [], stopReason: 'aborted', timestamp: Date.now() }
+    }
+    return { api: 'litellm-images', provider: model.provider, model: model.id, output: [], stopReason: 'error', errorMessage: String(err), timestamp: Date.now() }
+  }
+}
+
 export function buildProviderConfig(
   url: string,
   apiKey: string,
