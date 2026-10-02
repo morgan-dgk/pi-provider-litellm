@@ -348,7 +348,7 @@ export async function generateImages(
   token: string,
   model: { id: string; provider: string },
   context: { input: { type: string; text?: string }[] },
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; metadata?: Record<string, unknown> },
 ): Promise<{
   api: string
   provider: string
@@ -371,7 +371,7 @@ export async function generateImages(
         'Authorization': `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ model: model.id, prompt, n: 1, response_format: 'b64_json' }),
+      body: JSON.stringify({ model: model.id, prompt, n: 1, response_format: 'b64_json', ...options?.metadata }),
       signal: options?.signal,
     })
 

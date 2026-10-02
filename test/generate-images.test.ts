@@ -154,6 +154,35 @@ describe('generateImages', () => {
     expect(body.response_format).toBe('b64_json')
   })
 
+  it('merges metadata into request body', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    } as Response)
+
+    await generateImages(mockConfig, 'test-key', mockModel, {
+      input: [{ type: 'text', text: 'A red fox' }],
+    }, { metadata: { size: '1536x1024', quality: 'hd' } })
+
+    const body = JSON.parse((vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.size).toBe('1536x1024')
+    expect(body.quality).toBe('hd')
+  })
+
+  it('metadata can override default n', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: [] }),
+    } as Response)
+
+    await generateImages(mockConfig, 'test-key', mockModel, {
+      input: [{ type: 'text', text: 'A red fox' }],
+    }, { metadata: { n: 3 } })
+
+    const body = JSON.parse((vi.mocked(globalThis.fetch).mock.calls[0][1] as RequestInit).body as string)
+    expect(body.n).toBe(3)
+  })
+
   it('includes a timestamp in the result', async () => {
     vi.mocked(globalThis.fetch).mockResolvedValue({
       ok: true,
