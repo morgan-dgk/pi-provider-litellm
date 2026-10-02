@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { mapToProviderModel, resolvePluginConfig, buildProviderConfig, readSkillsSetting, writeSkillsSetting } from '../src/litellm-api.js'
+import { mapToProviderModel, resolvePluginConfig, buildProviderConfig, readSkillsSetting, writeSkillsSetting, generateImages } from '../src/litellm-api.js'
 import type { LiteLLMModelInfo } from '../src/types.js'
 
 const mockReadFileSync = vi.hoisted(() => vi.fn())
@@ -54,6 +54,53 @@ describe('mapToProviderModel', () => {
       supportsDeveloperRole: false,
       supportsReasoningEffort: false,
     })
+  })
+
+  it('returns image model config for mode image_generation', () => {
+    const info: LiteLLMModelInfo = {
+      model_name: 'gemini-3-pro-image',
+      mode: 'image_generation',
+    }
+    const result = mapToProviderModel(info)
+    expect(result.type).toBe('image')
+    expect(result.api).toBe('litellm-images')
+    expect(result.output).toEqual(['image'])
+    expect(result.input).toEqual(['text'])
+    expect((result as any).reasoning).toBeUndefined()
+    expect((result as any).contextWindow).toBeUndefined()
+    expect((result as any).maxTokens).toBeUndefined()
+    expect((result as any).compat).toBeUndefined()
+  })
+
+  it('includes image in input for image_generation model with supports_vision', () => {
+    const info: LiteLLMModelInfo = {
+      model_name: 'gemini-2.5-flash-image',
+      mode: 'image_generation',
+      supports_vision: true,
+    }
+    const result = mapToProviderModel(info)
+    expect(result.type).toBe('image')
+    expect(result.input).toContain('image')
+    expect(result.input).toContain('text')
+  })
+
+  it('returns chat model config for non-image_generation mode', () => {
+    const info: LiteLLMModelInfo = {
+      model_name: 'gemini-embedding',
+      mode: 'embedding',
+    }
+    const result = mapToProviderModel(info)
+    expect(result.type).toBeUndefined()
+    expect((result as any).contextWindow).toBeDefined()
+  })
+
+  it('returns chat model config when mode is absent', () => {
+    const info: LiteLLMModelInfo = {
+      model_name: 'gpt-4',
+    }
+    const result = mapToProviderModel(info)
+    expect(result.type).toBeUndefined()
+    expect((result as any).contextWindow).toBeDefined()
   })
 })
 
@@ -224,5 +271,25 @@ describe('buildProviderConfig', () => {
   it('handles empty models map', () => {
     const config = buildProviderConfig('https://litellm.example.com', 'sk-test', {})
     expect(config.models).toHaveLength(0)
+  })
+
+  it('includes litellm-images handler in images field', () => {
+    const config = buildProviderConfig('https://litellm.example.com', 'sk-test', {})
+    expect(config.images).toBeDefined()
+    expect(config.images!['litellm-images']).toBeDefined()
+    expect(typeof config.images!['litellm-images']!.generateImages).toBe('function')
+  })
+
+  it('registers both chat and image models', () => {
+    const models = {
+      'gpt-4': { model_name: 'gpt-4' },
+      'gemini-3-pro-image': { model_name: 'gemini-3-pro-image', mode: 'image_generation' },
+    }
+    const config = buildProviderConfig('https://litellm.example.com', 'sk-test', models)
+    expect(config.models).toHaveLength(2)
+    const imageModel = config.models!.find(m => m.id === 'gemini-3-pro-image')
+    expect(imageModel?.type).toBe('image')
+    const chatModel = config.models!.find(m => m.id === 'gpt-4')
+    expect(chatModel?.type).toBeUndefined()
   })
 })
